@@ -5,12 +5,34 @@ mod time;
 
 use std::{env, error::Error, fs::File, io::Write};
 
-use reqwest::header::AUTHORIZATION;
+use reqwest::{header::AUTHORIZATION, Client};
 use serde_json::Value;
 
 use markets::{filter_markets, Market, Markets};
 use mathematics::{changes, mean_standard_deviation_ratio};
 use series::Series;
+
+async fn get_series(
+    client: &Client,
+    market: &Market,
+    authorization: &String,
+) -> Result<Series, Box<dyn Error>> {
+    let value = client
+        .get(format!(
+            "https://min-api.cryptocompare.com/data/v2/histoday?fsym={}&tsym=USD&limit=365",
+            market.get_symbol()
+        ))
+        .header(AUTHORIZATION, authorization)
+        .send()
+        .await?
+        .json::<Value>()
+        .await?;
+    let series = match Series::try_from(&value) {
+        Ok(value) => value,
+        Err(_error) => panic!("Failed to parse series"),
+    };
+    Ok(series)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -38,20 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let mut vector = Vec::new();
     for market in markets.get_markets() {
-        let value = client
-            .get(format!(
-                "https://min-api.cryptocompare.com/data/v2/histoday?fsym={}&tsym=USD&limit=365",
-                market.get_symbol()
-            ))
-            .header(AUTHORIZATION, &authorization)
-            .send()
-            .await?
-            .json::<Value>()
-            .await?;
-        let series = match Series::try_from(&value) {
-            Ok(value) => value,
-            Err(_error) => panic!("Failed to parse series"),
-        };
+        let series = get_series(&client, market, &authorization).await?;
         let changes = changes(&series);
         let mean_standard_deviation_ratio = mean_standard_deviation_ratio(&changes);
         if mean_standard_deviation_ratio.is_nan() {
@@ -75,5 +84,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let string = serde_json::to_string(array)?;
     file.write_all(string.as_bytes())?;
     println!("Wrote {} markets to {}", array.len(), path);
+    let market = Market::new(None, None, None, arguments[5].clone());
+    let series = get_series(&client, &market, &authorization).await?;
+    let changes = changes(&series);
+    let path = &arguments[6];
+    let mut file = File::create(path)?;
+    let string = serde_json::to_string(&changes)?;
+    file.write_all(string.as_bytes())?;
+    println!("Wrote {} changes to {}", changes.len(), path);
     Ok(())
 }
