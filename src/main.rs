@@ -3,7 +3,7 @@ mod mathematics;
 mod series;
 mod time;
 
-use std::{env, error::Error, fs::File, io::Write};
+use std::{env, error::Error, fs::File, io::Write, path::MAIN_SEPARATOR};
 
 use reqwest::{header::AUTHORIZATION, Client};
 use serde_json::Value;
@@ -76,6 +76,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             market.get_start_date(),
             market.get_symbol().to_string(),
         ));
+        let path = format!(
+            "storage{}{}changes.json",
+            MAIN_SEPARATOR,
+            market.get_symbol().to_lowercase()
+        );
+        let mut file = File::create(&path)?;
+        let string = serde_json::to_string(&changes)?;
+        file.write_all(string.as_bytes())?;
+        println!("Wrote {} changes to {}", changes.len(), path);
     }
     let mut markets = Markets::new(vector);
     let array = markets.top_k_mean_standard_deviation_ratio(arguments[3].parse::<usize>()?);
@@ -84,13 +93,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let string = serde_json::to_string(array)?;
     file.write_all(string.as_bytes())?;
     println!("Wrote {} markets to {}", array.len(), path);
-    let market = Market::new(None, None, None, arguments[5].clone());
-    let series = get_series(&client, &market, &authorization).await?;
-    let changes = changes(&series);
-    let path = &arguments[6];
-    let mut file = File::create(path)?;
-    let string = serde_json::to_string(&changes)?;
-    file.write_all(string.as_bytes())?;
-    println!("Wrote {} changes to {}", changes.len(), path);
     Ok(())
 }
